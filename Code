@@ -1,0 +1,241 @@
+# Code for Financial Google Sheet:
+
+function onOpen() {
+  var ui = SpreadsheetApp.getUi();
+  ui.createMenu('Custom Script')
+    .addItem('Generate Stats', 'generateStats')
+    .addToUi();
+}
+
+function generateStats() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var statsSheet = ss.getSheetByName("Stats");
+  if (!statsSheet) {
+    statsSheet = ss.insertSheet("Stats");
+  } else {
+    statsSheet.clear();
+  }
+
+  var sheets = ["Momentum", "CIB", "Hestony"];
+  var headers = ["TECH", "OUR REF", "RECOVERED"];
+  var rowIndexes = [1, 11, 1];
+  var rowIndex;
+  
+  var currentRow = 2;
+  
+  sheets.forEach(function(sheetName, index) {
+    var sheet = ss.getSheetByName(sheetName);
+    rowIndex = rowIndexes[index];
+    var data = sheet.getRange(rowIndex, 1, sheet.getMaxRows(), sheet.getMaxColumns()).getValues();
+    var header = data[0];
+    var techCol = header.indexOf("TECH");
+    var refCol = header.indexOf("OUR REF");
+    var recCol = header.indexOf("RECOVERED");
+    
+    var statsData = [];
+    
+    for (var i = 1; i < data.length; i++) {
+      if (data[i][techCol]) {
+        statsData.push([data[i][techCol], data[i][refCol], data[i][recCol]]);
+      }
+    }
+    
+    var groupedData = {};
+    statsData.forEach(function(row) {
+      var tech = row[0];
+      if (!groupedData[tech]) {
+        groupedData[tech] = [];
+      }
+      groupedData[tech].push(row);
+    });
+
+    var newStatsData = [];
+    var sheetTotal = 0;
+
+    newStatsData.push([sheetName, "", ""]);
+    newStatsData.push(["TECH", "OUR REF", "RECOVERED"]);
+    
+    for (var tech in groupedData) {
+      var userData = groupedData[tech];
+      var userTotal = 0;
+      
+      userData.forEach(function(row) {
+        newStatsData.push(row);
+        userTotal += row[2];
+      });
+      
+      newStatsData.push(["Subtotal for " + tech, "", userTotal]);
+      newStatsData.push(["", "", ""]);
+      sheetTotal += userTotal;
+    }
+    
+    newStatsData.push(["Grand Total for " + sheetName, "", sheetTotal]);
+    newStatsData.push(["", "", ""]);
+    
+    statsSheet.getRange(currentRow, 1, newStatsData.length, 3).setValues(newStatsData);
+    currentRow += newStatsData.length;
+  });
+}
+
+# Code for Administrative Google Sheet
+
+function onOpen() {
+  var ui = SpreadsheetApp.getUi();
+  ui.createMenu('Custom Scripts')
+      .addItem('Run Filter and Sort Script', 'filterSortAndSubtotal')
+      .addToUi();
+}
+
+function filterSortAndSubtotal() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  
+   var releasesSheet = ss.getSheetByName('Releases');
+  if (!releasesSheet) {
+    Logger.log('Releases sheet not found');
+    return;
+  }
+  
+  var specifiedDateString = releasesSheet.getRange('M1').getDisplayValue();
+  Logger.log('Specified Date String: ' + specifiedDateString);
+  
+  if (specifiedDateString) {
+    try {
+      var specifiedDate = new Date(specifiedDateString);
+      Logger.log('Specified Date: ' + specifiedDate);
+  
+            if (isNaN(specifiedDate.getTime())) {
+        throw new Error('Invalid date');
+      }
+    } catch (error) {
+      Logger.log('Error parsing date: ' + error.message);
+      return;
+    }
+  } else {
+    Logger.log('Specified date string is empty');
+    return;
+  }
+  
+  var range = releasesSheet.getDataRange();
+  var values = range.getValues();
+  
+  var filteredData = [];
+  
+  var headers = values[0];
+  filteredData.push(headers);
+  
+   var dateSignedColumnIndex = headers.indexOf('Date Signed');
+  var fileOwnerColumnIndex = headers.indexOf('File Owner');
+  var amountColumnIndex = headers.indexOf('Amount');
+  var paidByTPColumnIndex = headers.indexOf('PAID BY TP?');
+  
+  Logger.log('Date Signed Column Index: ' + dateSignedColumnIndex);
+  Logger.log('File Owner Column Index: ' + fileOwnerColumnIndex);
+  Logger.log('Amount Column Index: ' + amountColumnIndex);
+  Logger.log('PAID BY TP? Column Index: ' + paidByTPColumnIndex);
+  
+   for (var i = 1; i < values.length; i++) {
+    var dateSigned = new Date(values[i][dateSignedColumnIndex]);
+    Logger.log('Row ' + i + ' Date Signed: ' + dateSigned);
+    if (dateSigned >= specifiedDate) {
+      filteredData.push(values[i]);
+    }
+  }
+  
+  Logger.log('Filtered Data: ' + JSON.stringify(filteredData));
+  
+  var sortedData = filteredData.slice(1).sort(function(a, b) {
+    return a[fileOwnerColumnIndex].localeCompare(b[fileOwnerColumnIndex]);
+  });
+  
+  sortedData.unshift(headers);
+  
+  var finalData = [headers];
+  var currentOwner = '';
+  var currentTotal = 0;
+  var currentUnpaidTotal = 0;
+  var grandTotal = 0;
+  var grandUnpaidTotal = 0;
+  
+  for (var i = 1; i < sortedData.length; i++) {
+    if (sortedData[i][fileOwnerColumnIndex] !== currentOwner && currentOwner !== '') {
+      var subtotalRow = new Array(headers.length).fill(''); // Create an empty row
+      subtotalRow[amountColumnIndex] = 'Subtotal';
+      subtotalRow[amountColumnIndex + 1] = currentTotal;
+      finalData.push(subtotalRow);
+      
+      var unpaidSubtotalRow = new Array(headers.length).fill(''); // Create an empty row
+      unpaidSubtotalRow[amountColumnIndex] = 'Unpaid Subtotal';
+      unpaidSubtotalRow[amountColumnIndex + 1] = currentUnpaidTotal;
+      finalData.push(unpaidSubtotalRow);
+      
+      grandTotal += currentTotal;
+      grandUnpaidTotal += currentUnpaidTotal;
+      currentTotal = 0;
+      currentUnpaidTotal = 0;
+    }
+    currentOwner = sortedData[i][fileOwnerColumnIndex];
+    currentTotal += sortedData[i][amountColumnIndex];
+    if (sortedData[i][paidByTPColumnIndex] === 'UNPAID') {
+      currentUnpaidTotal += sortedData[i][amountColumnIndex];
+    }
+    finalData.push(sortedData[i]);
+  }
+  
+  var finalSubtotalRow = new Array(headers.length).fill('');
+  finalSubtotalRow[amountColumnIndex] = 'Subtotal';
+  finalSubtotalRow[amountColumnIndex + 1] = currentTotal;
+  finalData.push(finalSubtotalRow);
+  
+  var finalUnpaidSubtotalRow = new Array(headers.length).fill('');
+  finalUnpaidSubtotalRow[amountColumnIndex] = 'Unpaid Subtotal';
+  finalUnpaidSubtotalRow[amountColumnIndex + 1] = currentUnpaidTotal;
+  finalData.push(finalUnpaidSubtotalRow);
+  
+  grandTotal += currentTotal;
+  grandUnpaidTotal += currentUnpaidTotal;
+  
+  var grandTotalRow = new Array(headers.length).fill('');
+  grandTotalRow[amountColumnIndex] = 'Grand Total';
+  grandTotalRow[amountColumnIndex + 1] = grandTotal;
+  finalData.push(grandTotalRow);
+  
+  var grandUnpaidTotalRow = new Array(headers.length).fill('');
+  grandUnpaidTotalRow[amountColumnIndex] = 'Grand Unpaid Total';
+  grandUnpaidTotalRow[amountColumnIndex + 1] = grandUnpaidTotal;
+  finalData.push(grandUnpaidTotalRow);
+  
+  var statsSheet = ss.getSheetByName('Current Month Stats');
+  if (!statsSheet) {
+    statsSheet = ss.insertSheet('Current Month Stats');
+  } else {
+    statsSheet.clear();
+  }
+  
+  statsSheet.getRange(3, 1, finalData.length, finalData[0].length).setValues(finalData);
+  
+  var outstandingData = [headers]; // Start with the header
+  var outstandingTotal = 0;
+  
+  for (var i = 1; i < values.length; i++) {
+    var dateSigned = new Date(values[i][dateSignedColumnIndex]);
+    if (values[i][paidByTPColumnIndex] === 'UNPAID' && dateSigned < specifiedDate) {
+      outstandingData.push(values[i]);
+      outstandingTotal += values[i][amountColumnIndex];
+    }
+  }
+  
+  var totalRow = new Array(headers.length).fill('');
+  totalRow[amountColumnIndex] = 'Total';
+  totalRow[amountColumnIndex + 1] = outstandingTotal;
+  outstandingData.push(totalRow);
+  
+  var outstandingSheet = ss.getSheetByName('Outstanding Stats');
+  if (!outstandingSheet) {
+    outstandingSheet = ss.insertSheet('Outstanding Stats');
+  } else {
+    outstandingSheet.clear();
+  }
+  
+  outstandingSheet.getRange(1, 1, outstandingData.length, outstandingData[0].length).setValues(outstandingData);
+}
+
